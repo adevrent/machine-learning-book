@@ -241,14 +241,6 @@ for i, (feature, label) in enumerate(XY_dl):
 
 
 
-# # Use GPU tensors via cuda.
-# if torch.cuda.is_available():
-#     device = torch.device("cuda")
-#     print(f"Using GPU: {torch.cuda.get_device_name(0)}")
-# else:
-#     device = torch.device("cpu")
-#     print("CUDA is not available. Using CPU.")
-
 num_epochs = 1000  # run 1000 epochs
 eta = 1e-4  # learning rate
 
@@ -272,9 +264,6 @@ def lossfunc(y, yhat):
 loss_arr = []
 for epoch in range(num_epochs):
     for x_batch, y_batch in XY_dl:
-        # Move x and y tensors to GPU via cuda.
-        x_batch = x_batch.to(device)
-        y_batch = y_batch.to(device)
         # print("beta0 =", beta0)
         yhat = model_linreg(x_batch)
         loss = lossfunc(y_batch, yhat)
@@ -336,8 +325,8 @@ plt.ylabel("Residuals $\hat{y} - y$")
 
 
 # Decide the number of input and output neurons in the layer
-input_size = 1  # The layer has just 1 neuron (a.k.a. 1 weight) to process the feature vector.
-output_size = 1  # The layer outputs just 1 vector.
+input_size = 1
+output_size = 1
 model = nn.Linear(input_size, output_size)  # This is just a single linear layer.
 
 # Choose loss function (e.g. Mean Squared Error, Hinge Loss etc.)
@@ -432,8 +421,16 @@ train_dl = DataLoader(train_ds, batch_size, shuffle=True)
 
 
 
+for i, (feature, label) in enumerate(train_dl):
+    print("_"*40)
+    print(f"batch{i}:")
+    print("features =\n", feature)
+    print("    label =\n", label)
 
 
+# ## NN Architecture of this model:
+# 
+# ![image-2.png](attachment:image-2.png)
 
 
 
@@ -470,18 +467,17 @@ loss_hist = [0] * num_epochs
 accuracy_hist = [0] * num_epochs
 
 for epoch in range(num_epochs):
-
     for x_batch, y_batch in train_dl:
         pred = model(x_batch)
         loss = loss_fn(pred, y_batch.long())
         loss.backward()
         optimizer.step()
         optimizer.zero_grad()
-    
+
         loss_hist[epoch] += loss.item()*y_batch.size(0)
         is_correct = (torch.argmax(pred, dim=1) == y_batch).float()
         accuracy_hist[epoch] += is_correct.sum()
-        
+
     loss_hist[epoch] /= len(train_dl.dataset)
     accuracy_hist[epoch] /= len(train_dl.dataset)
 
@@ -505,6 +501,86 @@ plt.tight_layout()
 #plt.savefig('figures/12_09.pdf')
  
 plt.show()
+
+
+# My try:
+
+
+
+class MyNNModule(nn.Module):
+    def __init__(self, input_size, hidden_size, output_size):
+        super().__init__()
+        self.layer1 = nn.Linear(input_size, hidden_size)
+        self.layer2 = nn.Linear(hidden_size, output_size)
+    
+    def forward(self, x):
+        x = self.layer1(x)
+        x = nn.Tanh()(x)
+        x = self.layer2(x)
+        x = nn.Softmax(dim=1)(x)
+        return x
+
+
+iris = load_iris()
+X = iris['data']
+y = iris['target']
+
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=1./3, random_state=1)
+
+X_train = torch.from_numpy((X_train - X_train.mean()) / X_train.std(ddof=1)).float()
+y_train = torch.from_numpy(y_train).long()  # Use long instead of float for classification
+
+# Move data to the selected device
+if torch.cuda.is_available():
+    device = torch.device("cuda")
+    print(f"Using GPU: {torch.cuda.get_device_name(0)}")
+else:
+    device = torch.device("cpu")
+    print("CUDA is not available. Using CPU.")
+X_train = X_train.to(device)
+y_train = y_train.to(device)
+
+# Construct DatSet object
+train_ds = TensorDataset(X_train, y_train)
+
+# Construct DataLoader object
+train_dl = DataLoader(train_ds, batch_size=20, shuffle=True)
+
+# Initialize my Module subclass
+# feature vector size is extracted from X_train array
+# Hidden size is kind of arbitrary ?
+# There are 3 classes of flowers so output_size = 3
+model = MyNNModule(input_size=X_train.shape[1], hidden_size=16, output_size=3)
+model.to(device)  # convert model to cuda device
+
+eta = 0.001  # learning rate
+num_epochs = 10000  # number of epochs
+loss_fn = nn.CrossEntropyLoss()  # Cross entropy loss
+optimizer = torch.optim.Adam(model.parameters(), eta)  # Use SGD for updating, learning rate is eta
+
+loss_arr = [0] * num_epochs
+# Iterate over epochs
+for epoch in range(num_epochs):
+    for (batch_x, batch_y) in train_dl:
+        loss = 0
+        # print("batch_x =\n", batch_x)
+        # print("batch_y =\n", batch_y)
+
+        # 1. Generate predictions
+        pred = model(batch_x)
+
+        # 2. Calculate and print loss
+        loss += loss_fn(pred, batch_y)
+        loss.backward()  # back-propagate the gradients
+
+        # 3. Step forward
+        optimizer.step()
+        optimizer.zero_grad()  # reset gradient
+
+    loss_arr[epoch] = (loss.detach().cpu().numpy())
+
+print(loss_arr)
+plt.plot(loss_arr)
 
 
 # ### Evaluating the trained model on the test dataset
